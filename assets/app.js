@@ -325,6 +325,9 @@ function setupAceEditor(aceEl, textEl){
       $('#btnConv2 button').trigger('click');
     }
   });
+
+  // initialize value
+  $('#' + textEl).val(editor.getValue());
   
   return(editor)
 }
@@ -423,6 +426,31 @@ function exec_body_scripts(body_el) {
   }
 }; 
 
+function prepRequest(url, requestData, type){
+  type = type || 'POST';
+  return {
+    url: url,
+    contentType: 'application/json',
+    data: JSON.stringify(requestData),
+    type: type,
+    xhrFields: {
+      withCredentials: true
+    }
+  }
+}
+
+function getOutputWithExt(data, ext){
+  var outputs = data.split('\n');
+  var endsWithRegex = new RegExp(ext + '$');
+  var out;
+  outputs.forEach(function(output, index){
+    if(endsWithRegex.test(output)){
+      out = output;
+    }
+  });
+  return out;
+}
+
 // Run Code using OpenCPU
 function runCode(){
   $("#knitForm").submit(function(event){
@@ -432,70 +460,33 @@ function runCode(){
     
     var $form = $( this ),
       url = $form.attr('action'),
-      term = $("#nbSrc").val().replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-      
-    if (application.mode === "R"){
-      term = "```{r echo = F, message = F, warning = F, comment = NA}\n" + term + "\n```"
-    }
-    /*
-      rcode = 'library(knitr)\n' +
-        'knit2html(text = "' + term2 + '", fragment.only = TRUE)',
-      rcode2 = 'library(knitr)\n' +
-        'knit2html(text = knit(text = "' + term2 + '"), fragment.only = TRUE)';
-    */
-      rcode = 'library(knitr)\n' +
-        'knit2html(text = knit(text = "' + term + '"), fragment.only = TRUE)';
-      
-    /* Send the data using post and put the results in a div */
-    $.post(url, { x: rcode },
-      function( data ) {
-          $('#nbOut').html(eval(data));
-          $('pre code').each(function(i, e) {hljs.highlightBlock(e)});
+      term = $("#nbSrc").val().replace(/\\/g, '\\\\').replace(/"/g, '\\"'),
+      requestData = { text: term, con: "temp.Rmd" },
+      request = prepRequest(url, requestData);
+
+    var writeRmd = $.ajax(request);
+    var handleRmd = function(data){
+      var rmdLocation = getOutputWithExt(data, '.Rmd');
+      var fileUrl = "https://public.opencpu.org/" + rmdLocation;
+      return $.ajax(prepRequest(fileUrl, {format: 'html'}));
+    };
+    var handleConvertToHtml = function(data){
+      var htmlLocation = getOutputWithExt(data, '.html');
+      var fileUrl = "https://public.opencpu.org/" + htmlLocation;
+      return $.ajax(prepRequest(fileUrl, {}, 'GET'));
+    };
+
+    var convertToHtml = writeRmd
+      .pipe(handleRmd)
+      .pipe(handleConvertToHtml)
+      .done(function(data){
+        $('#nbOut').html(data);
+        $('pre code').each(function(i, e) {hljs.highlightBlock(e)});
       })
-      .error(function() { alert("An error occurred!"); });
+      .fail(function() { alert("An error occurred!"); });
   });
   $("#knitForm").submit();
 }
-
-function runCode2(){
-  
-  var btnEl = "#btnConv2"
-      formEl = "#knitForm",
-      textEl = "#nbSrc",
-      resultEl = "#nbOut";
-  $(btnEl).click(function() {
-    $(formEl).submit();
-  });
-  
-  /* attach a submit handler to the form */
-  $(formEl).submit(function(event) {
-
-    /* stop form from submitting normally */
-    event.preventDefault(); 
-      
-    /* get some values from elements on the page: */
-    var $form = $( this ),
-      term = $(textEl).val().replace(/\\/g, '\\\\').replace(/"/g, '\\"'),
-      term2 = "```{r echo = F, message = F, warning = F, comment = NA}\n" + term + "\n```"
-      url = $form.attr('action'),
-      rcode = 'library(knitr)\n' +
-        'knit2html(text = "' + term + '", fragment.only = TRUE)',
-      rcode2 = 'library(knitr)\n' +
-        'knit2html(text = knit(text = "' + term2 + '"), fragment.only = TRUE)';
-      
-    /* Send the data using post and put the results in a div */
-    $.post(url, { x: rcode },
-      function( data ) {
-          $(resultEl).html(eval(data));
-          $('pre code').each(function(i, e) {hljs.highlightBlock(e)});
-      })
-      .error(function() { alert("An error occurred!"); });
-    /*
-      .complete(function() {$(btnEl).attr('class', 'btn btn-small');})
-      
-    */
-  });
-};
 
 function clearSrc(){
   application.editor.setValue("");
